@@ -1,5 +1,6 @@
 import { makeAutoObservable } from "mobx";
 import { observer, useLocalObservable } from "mobx-react-lite";
+import { db } from "./db";
 
 type Todo = { id: number; text: string; done: boolean };
 
@@ -11,19 +12,56 @@ class TodoStore {
     makeAutoObservable(this);
   }
 
-  add = () => {
+  add = async () => {
     const text = this.input.trim();
     if (!text) return;
-    this.todos.push({ id: Date.now(), text, done: false });
+
+    const result = await db.transaction(async (tx) => {
+      const { rows } = await tx.query<Todo>(
+        `INSERT INTO todos (text, done) VALUES ($1, false) RETURNING id, text, done`,
+        [text],
+      );
+      const todo = rows[0];
+      await tx.query(
+        `INSERT INTO outbox (operation, payload) VALUES ('insert', $1)`,
+        [JSON.stringify(todo)],
+      );
+      return todo;
+    });
+
+    this.todos.push(result);
     this.input = "";
   };
 
-  toggle = (id: number) => {
+  toggle = async (id: number) => {
     const todo = this.todos.find((t) => t.id === id);
-    if (todo) todo.done = !todo.done;
+    if (!todo) return;
+
+    const done = !todo.done;
+
+    await db.transaction(async (tx) => {
+      await tx.query(
+        `UPDATE todos SET done = $1, updated_at = NOW() WHERE id = $2`,
+        [done, id],
+      );
+      await tx.query(
+        `INSERT INTO outbox (operation, payload) VALUES ('update', $1)`,
+        [JSON.stringify({ id, done })],
+      );
+    });
+
+    todo.done = done;
   };
 
-  remove = (id: number) => {
+  remove = async (id: number) => {
+    await db.transaction(async (tx) => {
+      await tx.query(`DELETE FROM todos WHERE id = $1`, [id]);
+      await tx.query(
+        `INSERT INTO outbox (operation, payload) VALUES ('delete', $1)`,
+        [JSON.stringify({ id })],
+      );
+    });
+
     this.todos = this.todos.filter((t) => t.id !== id);
   };
 }
