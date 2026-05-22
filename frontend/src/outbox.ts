@@ -2,16 +2,20 @@ import { makeAutoObservable } from "mobx";
 import { db } from "./db";
 
 type Operation = "insert" | "update" | "delete";
-type Status = "pending" | "sending" | "failed";
+type Status = "pending" | "sending" | "dead";
 
 export type OutboxEntry = {
   id: string;
   operation: Operation;
   payload: Record<string, unknown>;
   status: Status;
+  retry_count: number;
+  retry_after: string | null;
   created_at: string;
   error: string | null;
 };
+
+const MAX_RETRIES = 5;
 
 export class OutboxQueue {
   entries: OutboxEntry[] = [];
@@ -37,7 +41,10 @@ export class OutboxQueue {
 
     try {
       const { rows } = await db.query<OutboxEntry>(
-        `SELECT * FROM outbox WHERE status = 'pending' ORDER BY created_at ASC`,
+        `SELECT * FROM outbox
+         WHERE status = 'pending'
+           AND (retry_after IS NULL OR retry_after <= NOW())
+         ORDER BY created_at ASC`,
       );
 
       for (const entry of rows) {
@@ -89,13 +96,28 @@ export class OutboxQueue {
   };
 
   markFailed = async (id: string, error: string) => {
-    await db.query(
-      `UPDATE outbox SET status = 'failed', error = $1 WHERE id = $2`,
-      [error, id],
-    );
     const entry = this.entries.find((e) => e.id === id);
-    if (entry) {
-      entry.status = "failed";
+    if (!entry) return;
+
+    if (entry.retry_count >= MAX_RETRIES - 1) {
+      await db.query(
+        `UPDATE outbox SET status = 'dead', error = $1 WHERE id = $2`,
+        [error, id],
+      );
+      entry.status = "dead";
+      entry.error = error;
+    } else {
+      const nextRetry = entry.retry_count + 1;
+      const retryAfter = new Date(
+        Date.now() + Math.pow(2, nextRetry) * 1000,
+      ).toISOString();
+      await db.query(
+        `UPDATE outbox SET status = 'pending', retry_count = $1, retry_after = $2, error = $3 WHERE id = $4`,
+        [nextRetry, retryAfter, error, id],
+      );
+      entry.status = "pending";
+      entry.retry_count = nextRetry;
+      entry.retry_after = retryAfter;
       entry.error = error;
     }
   };

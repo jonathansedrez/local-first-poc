@@ -16,7 +16,9 @@ export const initDb = async () => {
       id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
       operation TEXT NOT NULL CHECK (operation IN ('insert', 'update', 'delete')),
       payload JSONB NOT NULL,
-      status TEXT NOT NULL DEFAULT 'pending' CHECK (status IN ('pending', 'sending', 'failed')),
+      status TEXT NOT NULL DEFAULT 'pending' CHECK (status IN ('pending', 'sending', 'dead')),
+      retry_count INTEGER NOT NULL DEFAULT 0,
+      retry_after TIMESTAMPTZ,
       created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
       error TEXT
     );
