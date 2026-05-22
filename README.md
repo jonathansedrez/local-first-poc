@@ -49,6 +49,7 @@ On failure, entries are retried with exponential backoff (`2^retryCount` seconds
 - After every user action (post-enqueue)
 - On app startup (drains entries from previous session)
 - When the browser comes back online (`window online` event)
+- Every 5 seconds via `setInterval` (picks up entries whose `retry_after` has elapsed)
 
 ## Getting started
 

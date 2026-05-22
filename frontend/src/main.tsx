@@ -13,6 +13,9 @@ const BACKEND_URL = import.meta.env.VITE_BACKEND_URL;
 // trigger process after reconnect
 window.addEventListener("online", () => outboxQueue.process(BACKEND_URL));
 
+// poll every 5s
+setInterval(() => outboxQueue.process(BACKEND_URL), 5000);
+
 initDb().then(() => {
   outboxQueue.process(BACKEND_URL);
   createRoot(document.getElementById("root")!).render(
