@@ -3,6 +3,8 @@ import { observer, useLocalObservable } from "mobx-react-lite";
 import { db } from "./db";
 import { outboxQueue } from "./outbox";
 
+const BACKEND_URL = import.meta.env.VITE_BACKEND_URL;
+
 type Todo = { id: number; text: string; done: boolean };
 
 class TodoStore {
@@ -23,6 +25,7 @@ class TodoStore {
     );
     const todo = rows[0];
     await outboxQueue.enqueue("insert", todo);
+    outboxQueue.process(BACKEND_URL);
 
     this.todos.push(todo);
     this.input = "";
@@ -39,6 +42,7 @@ class TodoStore {
       [done, id],
     );
     await outboxQueue.enqueue("update", { id, done });
+    outboxQueue.process(BACKEND_URL);
 
     todo.done = done;
   };
@@ -46,6 +50,7 @@ class TodoStore {
   remove = async (id: number) => {
     await db.query(`DELETE FROM todos WHERE id = $1`, [id]);
     await outboxQueue.enqueue("delete", { id });
+    outboxQueue.process(BACKEND_URL);
 
     this.todos = this.todos.filter((t) => t.id !== id);
   };
