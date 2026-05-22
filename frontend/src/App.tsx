@@ -1,6 +1,7 @@
 import { makeAutoObservable } from "mobx";
 import { observer, useLocalObservable } from "mobx-react-lite";
 import { db } from "./db";
+import { outboxQueue } from "./outbox";
 
 type Todo = { id: number; text: string; done: boolean };
 
@@ -16,20 +17,14 @@ class TodoStore {
     const text = this.input.trim();
     if (!text) return;
 
-    const result = await db.transaction(async (tx) => {
-      const { rows } = await tx.query<Todo>(
-        `INSERT INTO todos (text, done) VALUES ($1, false) RETURNING id, text, done`,
-        [text],
-      );
-      const todo = rows[0];
-      await tx.query(
-        `INSERT INTO outbox (operation, payload) VALUES ('insert', $1)`,
-        [JSON.stringify(todo)],
-      );
-      return todo;
-    });
+    const { rows } = await db.query<Todo>(
+      `INSERT INTO todos (text, done) VALUES ($1, false) RETURNING id, text, done`,
+      [text],
+    );
+    const todo = rows[0];
+    await outboxQueue.enqueue("insert", todo);
 
-    this.todos.push(result);
+    this.todos.push(todo);
     this.input = "";
   };
 
@@ -39,28 +34,18 @@ class TodoStore {
 
     const done = !todo.done;
 
-    await db.transaction(async (tx) => {
-      await tx.query(
-        `UPDATE todos SET done = $1, updated_at = NOW() WHERE id = $2`,
-        [done, id],
-      );
-      await tx.query(
-        `INSERT INTO outbox (operation, payload) VALUES ('update', $1)`,
-        [JSON.stringify({ id, done })],
-      );
-    });
+    await db.query(
+      `UPDATE todos SET done = $1, updated_at = NOW() WHERE id = $2`,
+      [done, id],
+    );
+    await outboxQueue.enqueue("update", { id, done });
 
     todo.done = done;
   };
 
   remove = async (id: number) => {
-    await db.transaction(async (tx) => {
-      await tx.query(`DELETE FROM todos WHERE id = $1`, [id]);
-      await tx.query(
-        `INSERT INTO outbox (operation, payload) VALUES ('delete', $1)`,
-        [JSON.stringify({ id })],
-      );
-    });
+    await db.query(`DELETE FROM todos WHERE id = $1`, [id]);
+    await outboxQueue.enqueue("delete", { id });
 
     this.todos = this.todos.filter((t) => t.id !== id);
   };
