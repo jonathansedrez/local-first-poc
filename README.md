@@ -1,73 +1,73 @@
-# React + TypeScript + Vite
+# local-first-poc
 
-This template provides a minimal setup to get React working in Vite with HMR and some ESLint rules.
+A proof of concept for a local-first architecture using PGlite as an in-browser database and an outbox pattern to sync changes to a backend.
 
-Currently, two official plugins are available:
+## Structure
 
-- [@vitejs/plugin-react](https://github.com/vitejs/vite-plugin-react/blob/main/packages/plugin-react) uses [Oxc](https://oxc.rs)
-- [@vitejs/plugin-react-swc](https://github.com/vitejs/vite-plugin-react/blob/main/packages/plugin-react-swc) uses [SWC](https://swc.rs/)
-
-## React Compiler
-
-The React Compiler is not enabled on this template because of its impact on dev & build performances. To add it, see [this documentation](https://react.dev/learn/react-compiler/installation).
-
-## Expanding the ESLint configuration
-
-If you are developing a production application, we recommend updating the configuration to enable type-aware lint rules:
-
-```js
-export default defineConfig([
-  globalIgnores(['dist']),
-  {
-    files: ['**/*.{ts,tsx}'],
-    extends: [
-      // Other configs...
-
-      // Remove tseslint.configs.recommended and replace with this
-      tseslint.configs.recommendedTypeChecked,
-      // Alternatively, use this for stricter rules
-      tseslint.configs.strictTypeChecked,
-      // Optionally, add this for stylistic rules
-      tseslint.configs.stylisticTypeChecked,
-
-      // Other configs...
-    ],
-    languageOptions: {
-      parserOptions: {
-        project: ['./tsconfig.node.json', './tsconfig.app.json'],
-        tsconfigRootDir: import.meta.dirname,
-      },
-      // other options...
-    },
-  },
-])
+```
+local-first-poc/
+├── frontend/   React + MobX + PGlite
+└── backend/    Node + Express REST API
 ```
 
-You can also install [eslint-plugin-react-x](https://github.com/Rel1cx/eslint-react/tree/main/packages/plugins/eslint-plugin-react-x) and [eslint-plugin-react-dom](https://github.com/Rel1cx/eslint-react/tree/main/packages/plugins/eslint-plugin-react-dom) for React-specific lint rules:
+## Architecture
+
+### Core idea
+
+The user always writes to a local PGlite database first. The UI updates immediately from local state — no server round-trip on user actions. A background sync process drains the outbox to the backend when connectivity allows.
+
+```
+User action
+    │
+    ▼
+PGlite (in-browser)
+    ├── todos table       ← source of truth for UI
+    └── outbox table      ← queue of pending changes
+         │
+         ▼ OutboxQueue.process()
+    Backend REST API
+         │
+         ▼
+    In-memory store (Express)
+```
+
+### Outbox pattern
+
+Every write (insert, update, delete) is recorded in the `outbox` table alongside the actual data change. The `OutboxQueue` processes entries sequentially, oldest first, and sends them to the backend via REST.
+
+On failure, entries are retried with exponential backoff (`2^retryCount` seconds). After 5 failed attempts the entry is marked as `dead`.
+
+| Status | Meaning |
+|---|---|
+| `pending` | Waiting to be sent |
+| `sending` | Request in flight |
+| `dead` | Max retries exceeded |
+
+### Sync triggers
+
+`OutboxQueue.process()` is called:
+- After every user action (post-enqueue)
+- On app startup (drains entries from previous session)
+- When the browser comes back online (`window online` event)
+
+## Getting started
+
+**Backend**
+```bash
+cd backend && pnpm dev
+```
+
+**Frontend**
+```bash
+cd frontend && pnpm dev
+```
+
+## Debugging
+
+`db` and `outboxQueue` are exposed on `window` for browser console access:
 
 ```js
-// eslint.config.js
-import reactX from 'eslint-plugin-react-x'
-import reactDom from 'eslint-plugin-react-dom'
-
-export default defineConfig([
-  globalIgnores(['dist']),
-  {
-    files: ['**/*.{ts,tsx}'],
-    extends: [
-      // Other configs...
-      // Enable lint rules for React
-      reactX.configs['recommended-typescript'],
-      // Enable lint rules for React DOM
-      reactDom.configs.recommended,
-    ],
-    languageOptions: {
-      parserOptions: {
-        project: ['./tsconfig.node.json', './tsconfig.app.json'],
-        tsconfigRootDir: import.meta.dirname,
-      },
-      // other options...
-    },
-  },
-])
+await db.query("SELECT * FROM todos")
+await db.query("SELECT * FROM outbox")
+await outboxQueue.process("http://localhost:3000")
 ```
