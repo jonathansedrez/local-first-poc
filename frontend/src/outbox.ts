@@ -31,27 +31,24 @@ export class OutboxQueue {
     this.entries.push(rows[0]);
   };
 
-  process = async (upstreamUrl: string) => {
+  process = async (baseUrl: string) => {
     if (this.isProcessing) return;
     this.isProcessing = true;
 
     try {
       const { rows } = await db.query<OutboxEntry>(
-        `UPDATE outbox SET status = 'sending'
-         WHERE status = 'pending'
-         RETURNING *`,
+        `SELECT * FROM outbox WHERE status = 'pending' ORDER BY created_at ASC`,
       );
 
       for (const entry of rows) {
+        await db.query(`UPDATE outbox SET status = 'sending' WHERE id = $1`, [
+          entry.id,
+        ]);
+        const inMemory = this.entries.find((e) => e.id === entry.id);
+        if (inMemory) inMemory.status = "sending";
+
         try {
-          await fetch(upstreamUrl, {
-            method: "POST",
-            headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({
-              operation: entry.operation,
-              payload: entry.payload,
-            }),
-          });
+          await this.send(baseUrl, entry);
           await this.markSent(entry.id);
         } catch (err) {
           await this.markFailed(
@@ -63,6 +60,27 @@ export class OutboxQueue {
     } finally {
       this.isProcessing = false;
     }
+  };
+
+  private send = async (baseUrl: string, entry: OutboxEntry) => {
+    const { operation, payload } = entry;
+    const id = payload.id;
+
+    const res = await (operation === "insert"
+      ? fetch(`${baseUrl}/todos`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify(payload),
+        })
+      : operation === "update"
+        ? fetch(`${baseUrl}/todos/${id}`, {
+            method: "PATCH",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify(payload),
+          })
+        : fetch(`${baseUrl}/todos/${id}`, { method: "DELETE" }));
+
+    if (!res.ok) throw new Error(`HTTP ${res.status}`);
   };
 
   markSent = async (id: string) => {
