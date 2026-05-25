@@ -5,7 +5,7 @@ import { outboxQueue } from "./outbox";
 
 const BACKEND_URL = import.meta.env.VITE_BACKEND_URL;
 
-type Todo = { id: number; text: string; done: boolean };
+type Todo = { id: string; text: string; done: boolean };
 
 class TodoStore {
   todos: Todo[] = [];
@@ -19,9 +19,10 @@ class TodoStore {
     const text = this.input.trim();
     if (!text) return;
 
+    const id = crypto.randomUUID();
     const { rows } = await db.query<Todo>(
-      `INSERT INTO todos (text, done) VALUES ($1, false) RETURNING id, text, done`,
-      [text],
+      `INSERT INTO todos (id, text, done) VALUES ($1, $2, false) RETURNING id, text, done`,
+      [id, text],
     );
     const todo = rows[0];
     await outboxQueue.enqueue("insert", todo);
@@ -31,7 +32,7 @@ class TodoStore {
     this.input = "";
   };
 
-  toggle = async (id: number) => {
+  toggle = async (id: string) => {
     const todo = this.todos.find((t) => t.id === id);
     if (!todo) return;
 
@@ -47,7 +48,7 @@ class TodoStore {
     todo.done = done;
   };
 
-  remove = async (id: number) => {
+  remove = async (id: string) => {
     await db.query(`DELETE FROM todos WHERE id = $1`, [id]);
     await outboxQueue.enqueue("delete", { id });
     outboxQueue.process(BACKEND_URL);
