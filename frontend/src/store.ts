@@ -1,4 +1,4 @@
-import { makeAutoObservable } from "mobx";
+import { makeAutoObservable, runInAction } from "mobx";
 import { db } from "./db";
 import { outboxQueue } from "./outbox";
 
@@ -14,11 +14,15 @@ export class TodoStore {
     makeAutoObservable(this);
   }
 
+  setInput = (value: string) => {
+    this.input = value;
+  };
+
   load = async () => {
     const { rows } = await db.query<Todo>(
       "SELECT id, text, done FROM todos ORDER BY created_at ASC",
     );
-    this.todos = rows;
+    runInAction(() => { this.todos = rows; });
   };
 
   add = async () => {
@@ -34,8 +38,10 @@ export class TodoStore {
     await outboxQueue.enqueue("insert", todo);
     outboxQueue.process(BACKEND_URL);
 
-    this.todos.push(todo);
-    this.input = "";
+    runInAction(() => {
+      this.todos.push(todo);
+      this.input = "";
+    });
   };
 
   toggle = async (id: string) => {
@@ -51,7 +57,7 @@ export class TodoStore {
     await outboxQueue.enqueue("update", { id, done });
     outboxQueue.process(BACKEND_URL);
 
-    todo.done = done;
+    runInAction(() => { todo.done = done; });
   };
 
   remove = async (id: string) => {
@@ -59,7 +65,7 @@ export class TodoStore {
     await outboxQueue.enqueue("delete", { id });
     outboxQueue.process(BACKEND_URL);
 
-    this.todos = this.todos.filter((t) => t.id !== id);
+    runInAction(() => { this.todos = this.todos.filter((t) => t.id !== id); });
   };
 }
 

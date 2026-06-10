@@ -14,7 +14,11 @@ const BACKEND_URL = import.meta.env.VITE_BACKEND_URL;
 (window as any).inboxSync = inboxSync;
 (window as any).todoStore = todoStore;
 
-window.addEventListener("online", () => outboxQueue.process(BACKEND_URL));
+window.addEventListener("offline", () => inboxSync.disconnect());
+window.addEventListener("online", () => {
+  inboxSync.connect(BACKEND_URL);
+  outboxQueue.process(BACKEND_URL);
+});
 
 setInterval(() => outboxQueue.process(BACKEND_URL), 5000);
 

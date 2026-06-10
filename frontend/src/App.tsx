@@ -1,11 +1,13 @@
 import { observer } from "mobx-react-lite";
 import { todoStore } from "./store";
+import { ConnectionToast } from "./ConnectionToast";
 
 const App = observer(() => {
   const store = todoStore;
 
   return (
     <div>
+      <ConnectionToast />
       <h1>Todo</h1>
       <form
         onSubmit={(e) => {
@@ -15,9 +17,7 @@ const App = observer(() => {
       >
         <input
           value={store.input}
-          onChange={(e) => {
-            store.input = e.target.value;
-          }}
+          onChange={(e) => store.setInput(e.target.value)}
           placeholder="Add a task..."
         />
         <button type="submit">Add</button>
